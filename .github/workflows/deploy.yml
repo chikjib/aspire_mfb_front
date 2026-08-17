@@ -40,12 +40,13 @@ jobs:
           PORT: ${{ secrets.CPANEL_PORT }}
           USERNAME: ${{ secrets.CPANEL_USER }}
           SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
+          SSH_KEY_PASSPHRASE: ${{ secrets.CPANEL_SSH_PASSPHRASE }}
           KNOWN_HOSTS: ${{ secrets.CPANEL_KNOWN_HOSTS }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: |
           set -euo pipefail
 
-          for variable in HOST PORT USERNAME SSH_PRIVATE_KEY KNOWN_HOSTS VITE_API_BASE_URL; do
+          for variable in HOST PORT USERNAME SSH_PRIVATE_KEY SSH_KEY_PASSPHRASE KNOWN_HOSTS VITE_API_BASE_URL; do
             if [[ -z "${!variable:-}" ]]; then
               echo "Required deployment value $variable is missing."
               exit 1
@@ -68,6 +69,7 @@ jobs:
           HOST: ${{ secrets.CPANEL_HOST }}
           PORT: ${{ secrets.CPANEL_PORT }}
           SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
+          SSH_KEY_PASSPHRASE: ${{ secrets.CPANEL_SSH_PASSPHRASE }}
           KNOWN_HOSTS: ${{ secrets.CPANEL_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
@@ -78,7 +80,23 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-          ssh-keygen -y -f "$HOME/.ssh/cpanel_deploy_key" > /tmp/cpanel_deploy_key.pub
+          askpass_file="$RUNNER_TEMP/cpanel-ssh-askpass"
+          cat > "$askpass_file" <<'ASKPASS'
+          #!/usr/bin/env bash
+          printf '%s\n' "$SSH_KEY_PASSPHRASE"
+          ASKPASS
+          chmod 700 "$askpass_file"
+
+          eval "$(ssh-agent -s)"
+          printf 'SSH_AUTH_SOCK=%s\n' "$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          printf 'SSH_AGENT_PID=%s\n' "$SSH_AGENT_PID" >> "$GITHUB_ENV"
+
+          DISPLAY=:0 \
+            SSH_ASKPASS="$askpass_file" \
+            SSH_ASKPASS_REQUIRE=force \
+            setsid -w ssh-add "$HOME/.ssh/cpanel_deploy_key" < /dev/null
+
+          ssh-add -L > /tmp/cpanel_deploy_key.pub
           echo "GitHub is presenting this SSH key:"
           ssh-keygen -lf /tmp/cpanel_deploy_key.pub
 
@@ -98,11 +116,9 @@ jobs:
           remote_path="/home/$USERNAME/public_html"
 
           ssh \
-            -i "$HOME/.ssh/cpanel_deploy_key" \
             -p "$PORT" \
             -o BatchMode=yes \
             -o ConnectTimeout=20 \
-            -o IdentitiesOnly=yes \
             -o PasswordAuthentication=no \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
@@ -124,7 +140,7 @@ jobs:
             --delay-updates \
             --exclude='.well-known/' \
             --exclude='cgi-bin/' \
-            -e "ssh -i $HOME/.ssh/cpanel_deploy_key -p $PORT -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
+            -e "ssh -p $PORT -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
             dist/ \
             "$USERNAME@$HOST:/home/$USERNAME/public_html/"
 
@@ -135,11 +151,15 @@ jobs:
           USERNAME: ${{ secrets.CPANEL_USER }}
         run: |
           ssh \
-            -i "$HOME/.ssh/cpanel_deploy_key" \
             -p "$PORT" \
             -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$USERNAME@$HOST" \
             "test -s '/home/$USERNAME/public_html/index.html'"
+
+      - name: Remove deployment credentials
+        if: always()
+        run: |
+          ssh-agent -k >/dev/null 2>&1 || true
+          rm -f "$HOME/.ssh/cpanel_deploy_key" "$RUNNER_TEMP/cpanel-ssh-askpass"
