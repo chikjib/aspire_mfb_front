@@ -31,16 +31,40 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }} 
         run: npm run build
 
-      - name: Configure SSH
+      - name: Configure and verify SSH
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.CPANEL_KNOWN_HOSTS }}
+            HOST: ${{ secrets.CPANEL_HOST }}
+            PORT: ${{ secrets.CPANEL_PORT }}
+            USERNAME: ${{ secrets.CPANEL_USER }}
+            SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
+            KNOWN_HOSTS: ${{ secrets.CPANEL_KNOWN_HOSTS }}
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+            set -e
+
+            install -m 700 -d ~/.ssh
+
+            printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+
+            printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+
+            test -s ~/.ssh/id_rsa
+            test -s ~/.ssh/known_hosts
+
+            if ! ssh-keygen -F "$HOST" -f ~/.ssh/known_hosts >/dev/null \
+            && ! ssh-keygen -F "[$HOST]:$PORT" -f ~/.ssh/known_hosts >/dev/null; then
+            echo "No host key matching $HOST:$PORT exists in CPANEL_KNOWN_HOSTS"
+            exit 1
+            fi
+
+            ssh \
+            -i ~/.ssh/id_rsa \
+            -p "$PORT" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            "$USERNAME@$HOST" \
+            "echo 'SSH connection successful'"
 
       - name: Upload frontend to public_html
         env:
