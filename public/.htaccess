@@ -1,0 +1,14 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Leave real files, directories, cPanel and certificate challenges alone.
+  RewriteRule ^(?:\.well-known|cgi-bin)(?:/|$) - [L]
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Vue Router history-mode fallback.
+  RewriteRule ^ index.html [L]
+</IfModule>
+
