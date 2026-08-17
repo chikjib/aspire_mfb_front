@@ -31,8 +31,9 @@ const routes = [
   { path: '/privacy-policy', name: 'privacy-policy', component: LegalPage },
   { path: '/terms-and-conditions', name: 'terms-and-conditions', component: LegalPage },
   { path: '/admin/login', name: 'admin-login', component: AdminDashboard, meta: { admin: true } },
+  { path: '/admin/dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { admin: true } },
   { path: '/cms-admin', redirect: '/admin/login' },
-  { path: '/dashboard', redirect: '/admin/login' },
+  { path: '/dashboard', redirect: '/admin/dashboard' },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundPage },
 ]
 

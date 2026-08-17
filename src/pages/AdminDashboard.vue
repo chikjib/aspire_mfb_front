@@ -26,6 +26,16 @@ export default {
     }
   },
   computed: {
+    djangoAdminUrl() {
+      const configuredUrl = import.meta.env.VITE_DJANGO_ADMIN_URL?.trim()
+      if (configuredUrl) return `${configuredUrl.replace(/\/+$/, '')}/`
+
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+      return `${new URL(apiUrl, window.location.origin).origin}/admin/`
+    },
+    djangoPasswordResetUrl() {
+      return `${this.djangoAdminUrl}password_reset/`
+    },
     menuItems() {
       return [
         { id: 'overview', label: 'Overview', icon: '⌂' },
@@ -69,7 +79,12 @@ export default {
       try {
         const payload = await getCmsSession()
         this.user = payload.authenticated ? payload.user : null
-        if (this.user) await this.loadDashboard()
+        if (this.user) {
+          if (this.$route.name === 'admin-login') await this.$router.replace({ name: 'admin-dashboard' })
+          await this.loadDashboard()
+        } else if (this.$route.name === 'admin-dashboard') {
+          await this.$router.replace({ name: 'admin-login' })
+        }
       } catch (error) {
         this.loginError = 'The content service is unavailable. Please start the Django server.'
       } finally {
@@ -83,6 +98,7 @@ export default {
         const payload = await cmsLogin(this.loginForm)
         this.user = payload.user
         this.loginForm.password = ''
+        await this.$router.replace({ name: 'admin-dashboard' })
         await this.loadDashboard()
       } catch (error) {
         this.loginError = error.message
@@ -95,6 +111,7 @@ export default {
       this.user = null
       this.dashboard = null
       this.currentView = 'overview'
+      await this.$router.replace({ name: 'admin-login' })
     },
     async loadDashboard() {
       this.loading = true
@@ -189,6 +206,18 @@ export default {
     formatDate(value) {
       return value ? new Intl.DateTimeFormat('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value)) : '—'
     },
+    singularResourceLabel(resource, withArticle = false) {
+      const labels = {
+        pages: 'page',
+        sections: 'section',
+        navigation: 'menu item',
+        branches: 'branch',
+        faqs: 'FAQ',
+      }
+      const label = labels[resource] || 'item'
+      if (!withArticle) return label
+      return `${resource === 'faqs' ? 'an' : 'a'} ${label}`
+    },
   },
 }
 </script>
@@ -214,7 +243,7 @@ export default {
         <label>Password<input v-model="loginForm.password" type="password" autocomplete="current-password" required placeholder="Enter your password"></label>
         <p v-if="loginError" class="form-error">{{ loginError }}</p>
         <button class="admin-primary login-button" :disabled="loggingIn">{{ loggingIn ? 'Signing in…' : 'Sign in securely' }} <span>→</span></button>
-        <a href="http://127.0.0.1:8000/admin/password_reset/" class="forgot-link">Forgot your password?</a>
+        <a :href="djangoPasswordResetUrl" class="forgot-link">Forgot your password?</a>
       </form>
     </div>
   </section>
@@ -225,7 +254,7 @@ export default {
       <nav aria-label="CMS navigation">
         <button v-for="item in menuItems" :key="item.id" :class="{ active: currentView === item.id }" @click="switchView(item.id)"><span>{{ item.icon }}</span>{{ item.label }}</button>
       </nav>
-      <div class="sidebar-help"><span>?</span><div><strong>Need a hand?</strong><small>Use the classic admin for advanced changes.</small><a href="http://127.0.0.1:8000/admin/" target="_blank">Open Django admin ↗</a></div></div>
+      <div class="sidebar-help"><span>?</span><div><strong>Need a hand?</strong><small>Use the classic admin for advanced changes.</small><a :href="djangoAdminUrl" target="_blank" rel="noopener noreferrer">Open Django admin ↗</a></div></div>
       <RouterLink to="/" class="view-site-link">View live website <span>↗</span></RouterLink>
     </aside>
     <button v-if="sidebarOpen" class="admin-overlay" aria-label="Close menu" @click="sidebarOpen = false"></button>
@@ -263,7 +292,7 @@ export default {
           </section>
 
           <section v-else class="collection-view">
-            <div class="collection-heading"><div><span class="admin-kicker">Website content</span><h1>{{ currentLabel }}</h1><p>Review, organise and update the content customers see.</p></div><button class="admin-primary" @click="newItem(currentView)">＋ Add {{ currentView === 'faqs' ? 'an FAQ' : currentView === 'navigation' ? 'a menu item' : currentView === 'sections' ? 'a section' : `a ${currentView.slice(0,-1)}` }}</button></div>
+            <div class="collection-heading"><div><span class="admin-kicker">Website content</span><h1>{{ currentLabel }}</h1><p>Review, organise and update the content customers see.</p></div><button class="admin-primary" @click="newItem(currentView)">＋ Add {{ singularResourceLabel(currentView, true) }}</button></div>
             <div class="content-toolbar"><p><strong>{{ currentItems.length }}</strong> items</p><span>Changes appear on the website after saving.</span></div>
             <div class="admin-table-wrap">
               <table class="admin-table">
@@ -287,7 +316,7 @@ export default {
 
     <div v-if="editor" class="editor-backdrop" @click.self="editor = null">
       <form class="editor-drawer" @submit.prevent="saveEditor">
-        <header><div><span class="admin-kicker">{{ editor.id ? 'Edit content' : 'New content' }}</span><h2>{{ editorResource === 'settings' ? 'Site settings' : editor.title || editor.heading || editor.label || editor.name || editor.question || `New ${editorResource.slice(0,-1)}` }}</h2></div><button type="button" aria-label="Close editor" @click="editor = null">×</button></header>
+        <header><div><span class="admin-kicker">{{ editor.id ? 'Edit content' : 'New content' }}</span><h2>{{ editorResource === 'settings' ? 'Site settings' : editor.title || editor.heading || editor.label || editor.name || editor.question || `New ${singularResourceLabel(editorResource)}` }}</h2></div><button type="button" aria-label="Close editor" @click="editor = null">×</button></header>
         <div class="editor-body">
           <p v-if="error" class="form-error">{{ error }}</p>
           <template v-if="editorResource === 'pages'">
